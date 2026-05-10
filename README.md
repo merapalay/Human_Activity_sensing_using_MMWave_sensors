@@ -1,9 +1,13 @@
 📡 Human-Micro-Activity-Identification-using-mmWave-sensor
 
 Group No-4
+
 Merapala Yaswanth - 25CS4518
+
 Rupam Dutta - 25ME4410
+
 Gorli Venkata Ramana Murthy - 25CS4510
+
 Soumyadeep Datta - 25CS4508
 
 This repository contains a complete end-to-end Machine Learning pipeline for real-time Human Activity Recognition (HAR) using dual mmWave radar sensors and an ESP32-S3 microcontroller.
