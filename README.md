@@ -8,19 +8,21 @@ Soumyadeep Datta - 25CS4508
 
 This repository contains a complete end-to-end Machine Learning pipeline for real-time Human Activity Recognition (HAR) using dual mmWave radar sensors and an ESP32-S3 microcontroller.
 
-By combining the RD-03D (tracking x/y coordinates, velocity, angle) and the DFRobot C4001 (tracking micro-motions, breathing, target energy), this system can accurately classify activities like Walking, Sitting, Standing, Entering, Exiting, and Empty Room (No Person) entirely on the edge without cloud processing.
+By combining the RD-03D (tracking x/y coordinates, velocity, angle) and the DFRobot C4001 (tracking micro-motions, breathing, target energy), this system can accurately classify activities like Walking, Sitting, Standing, Entering, Exiting, and Empty Room (No Person) entirely on the edge without cloud processing. Furthermore, it dynamically detects transient actions like Sit-to-Stand using on-device temporal logic.
 
 🚀 Features
 
 100% Edge AI: Runs a complete Random Forest model locally on the ESP32-S3. No cloud API calls required.
 
-Dual Radar Sensor(mmWave Sensors) Fusion: Combines macroscopic movement (RD-03D) with microscopic biological signals (C4001).
+Dual Radar Sensor Fusion: Combines macroscopic movement (RD-03D) with microscopic biological signals (C4001).
+
+Hardware-in-the-Loop (HITL) Evaluation: Natively tests real-time accuracy by reading a 20% validation split directly from an SD card before transitioning to live sensing.
+
+Temporal State Machine: Detects instantaneous transitions (e.g., SIT -> STAND) without retraining the ML model.
 
 Robust Ghost Target Filter: Intelligent logic completely eliminates "ghost" radar reflections from empty walls/desks.
 
 Live Confidence Scoring: Calculates real-time prediction stability and displays accuracy percentages on an OLED screen.
-
-Complete ETL Pipeline: Includes Jupyter Notebooks for noise removal (Rolling Mean), SMOTE class balancing, and Correlation Heatmap generation.
 
 🛠️ Hardware Requirements
 
@@ -32,31 +34,29 @@ Sensor 2: DFRobot C4001 mmWave Radar (Connected via I2C)
 
 Display: OLED Display (SH110X, I2C)
 
-Other: Breadboard, Jumper Wires.
+Storage: MicroSD Card Module (Connected via SPI)
 
-For Pin Configration see datacollection folder's ino file
+Other: Breadboard, Jumper Wires.
 
 📁 Repository Structure
 
 Dataset/ - (Folder) Raw CSV datasets are stored here, usually managed via Google Drive during training.
 
-datacollection/ - (Arduino Project Folder) Contains the Arduino sketch used to collect the initial raw radar telemetry data into CSV format.
+datacollection/ - (Arduino Project Folder) Contains the Arduino sketch used to collect the initial raw radar telemetry data into CSV format using an automated 10s/30s state machine.
 
 ML_Model_randomForest/ - (Arduino Project Folder)
 
-ML_Model_randomForest.ino - The Arduino script that manages the sensors, applies live data smoothing, runs the ML prediction, and updates the OLED display.
+ML_Model_randomForest.ino - The main Arduino script that manages the sensors, applies live data smoothing, evaluates SD card ground truth, runs the ML prediction, tracks state transitions, and updates the OLED display.
 
 model_data.h - The generated purely C++ Machine Learning model (to be placed inside the ML_Model_randomForest folder for compiling).
+
+generate_sd_test_data.py - Extracts the exact 20% validation split from the Python environment to evaluate true accuracy on the ESP32.
 
 DATA_PREPROCESSING.ipynb - The ETL pipeline notebook. Generates synthetic empty room data, applies 20Hz Rolling Mean smoothing, labels data, removes noise, and balances classes using SMOTE.
 
 Class Clustering Analysis and Model generation.ipynb - Notebook that trains a highly compact, ESP32-optimized Random Forest model and exports it directly to C++ using micromlgen.
 
-GRAPHS.ipynb - Generates side-by-side comparative visual graphs (KDE, Boxplots) to analyze radar telemetry per activity.
-
-DFRobot_C4001-master.zip - Required C4001 sensor library for the Arduino IDE.
-
-README.md - This file.
+GRAPHS.ipynb - Generates side-by-side comparative visual graphs (KDE, Boxplots, Scatter) to analyze radar telemetry per activity.
 
 🧠 The Machine Learning Pipeline
 
@@ -72,7 +72,7 @@ n_estimators = 100 (A strong ensemble consensus)
 
 max_depth = 15 (Allows deep pattern learning without excessive memory consumption)
 
-max_leaf_nodes = 100 (Crucial constraint that caps the absolute maximum size of the C++ if/else logic, keeping the model lightweight).
+max_leaf_nodes = 100 (Crucial constraint that caps the absolute maximum size of the C++ if/else logic, compressing the model to ~3.1 MB).
 
 3. C++ Porting
 
@@ -82,35 +82,31 @@ We utilize micromlgen to convert the trained Python Random Forest into plain-tex
 
 Part 1: Training the Model (Google Colab / Jupyter)
 
-Mount your Google Drive or place your raw CSV files (gathered using the datacollection Arduino script) in the Dataset folder.
+Mount your Google Drive or place your raw CSV files in the Dataset folder.
+
+Run all cells in DATA_PREPROCESSING.ipynb to clean the data and balance classes using SMOTE.
 
 Don't forget to Replace the address of the dataset in the code before running. for identification purpose i have replaced the address with this words "ADD THE ADDRESS OF THE DATASET".
 
-Run all cells in DATA_PREPROCESSING.ipynb to clean the data, generate empty room baselines, balance classes, and output the final processed dataset.
+Run Class Clustering Analysis and Model generation.ipynb. Move the generated model_data.h file into the ML_Model_randomForest/ Arduino folder.
 
-Run Class Clustering Analysis and Model generation.ipynb. This will read the clean data, train the ML model, and generate a new model_data.h file. Move this file into the ML_Model_randomForest/ folder.
+Run generate_sd_test_data.py to generate test_data_for_esp32.csv. Place this file on the root of your MicroSD card.
 
 Part 2: Flashing the ESP32
 
-Open the Arduino IDE.
+Open the Arduino IDE. Install Adafruit GFX and Adafruit SH110X via the Library Manager. Install the C4001 zip library manually.
 
-Ensure you have installed the required libraries:
+Open ML_Model_randomForest.ino.
 
-Install Adafruit GFX and Adafruit SH110X via the Library Manager.
-
-Manually install the C4001 library: In the Arduino IDE, go to Sketch > Include Library > Add .ZIP Library... and select the DFRobot_C4001-master.zip file provided in this repository.
-
-Open ML_Model_randomForest.ino from the ML_Model_randomForest/ folder (ensure model_data.h is inside the same folder).
-
-Update the Wi-Fi credentials in the .ino file to allow for initial NTP time synchronization.
+At the top of the file, set bool evaluationModeActive = true; if you want to test the model's accuracy against the SD Card dataset, or false to jump straight to live radar sensing.
 
 Compile and flash to your ESP32-S3.
 
-🔍 The "Ghost Target" Filter (Edge Logic)
+🔍 Advanced Edge Heuristics
 
-One of the main challenges with mmWave radar is "Ghost Targets" — the radar bouncing off static objects (desks, walls) in an empty room, causing the AI to hallucinate a person standing perfectly still.
+1. The "Ghost Target" Filter
 
-To solve this, the ESP32 code implements an override filter:
+One of the main challenges with mmWave radar is "Ghost Targets" — the radar bouncing off static objects in an empty room, causing the AI to hallucinate a person standing perfectly still. The ESP32 implements a deterministic override:
 
 // If the highly-sensitive C4001 detects 0 targets (no micro-motion/breathing)
 // AND the RD-03D detects 0 speed, the room is genuinely empty.
@@ -118,7 +114,13 @@ if (c4001_raw_targets == 0.0 && rd_velocity_cm_s == 0.0) {
 raw_prediction = "NO_PERSON";
 }
 
-This forces the AI to output NO_PERSON, completely mitigating static wall reflections while preserving the ability to detect humans sitting perfectly still (via breathing detection).
+2. Temporal State Machine (Transitions)
+
+Instead of wasting memory retraining the model to detect 2-second transient actions (which introduces temporal noise), the ESP32 maintains a historical state tracker. If the AI detects a rapid shift from SITTING to STANDING, the hardware logic mathematically deduces a SIT -> STAND transition and briefly flags it on the UI.
+
+3. Hardware-in-the-Loop (HITL) SD Evaluation
+
+When evaluationModeActive is triggered, the ESP32 reads raw test features from the SD card, runs the C++ inference, and compares the output to the ground-truth string. Once processing is complete, it displays the True Cumulative Accuracy before automatically falling back into Live Sensor Mode.
 
 📜 License
 
